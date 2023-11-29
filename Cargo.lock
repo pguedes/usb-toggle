@@ -46,7 +46,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rusb-test"
+name = "usbpc"
 version = "0.1.0"
 dependencies = [
  "rusb",

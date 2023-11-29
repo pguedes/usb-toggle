@@ -1,13 +1,89 @@
-fn main() {
-    for device in rusb::devices().unwrap().iter() {
+use std::fmt::Display;
+use std::fs;
+use std::time::Duration;
+
+struct PortConnectedDevice {
+    device: rusb::Device<rusb::GlobalContext>,
+    device_desc: rusb::DeviceDescriptor,
+    ports: Vec<u8>,
+}
+
+impl PortConnectedDevice {
+    fn from(device: rusb::Device<rusb::GlobalContext>) -> Option<PortConnectedDevice> {
         let device_desc = device.device_descriptor().unwrap();
+        device.port_numbers().ok()
+            .filter(|p| !p.is_empty())
+            .map(|ports| PortConnectedDevice { device, device_desc, ports })
+    }
 
-        println!("{:?}", device.active_config_descriptor());
+    fn id(&self) -> String {
+        format!("{}:{}", self.device_desc.vendor_id(), self.device_desc.product_id())
+    }
 
-        println!("Bus {:03} Device {:03} ID {:04x}:{:04x}",
-            device.bus_number(),
-            device.address(),
-            device_desc.vendor_id(),
-            device_desc.product_id());
+    fn active(&self) -> bool {
+        self.device.active_config_descriptor().map_or(false, |_| true)
+    }
+
+    fn toggle(self) -> std::io::Result<()> {
+        if self.active() {
+            self.unbind()
+        } else {
+            self.bind()
+        }
+    }
+
+    fn path(&self) -> String {
+        format!("{}-{}",
+                self.device.bus_number(),
+                self.ports.iter().map(|p| p.to_string()).collect::<Vec<String>>().join(".")
+        )
+    }
+
+    fn bind(&self) -> std::io::Result<()> {
+        fs::write("/sys/bus/usb/drivers/usb/bind", self.path())
+    }
+
+    fn unbind(self) -> std::io::Result<()> {
+        fs::write("/sys/bus/usb/drivers/usb/unbind", self.path())
+    }
+
+    fn description(&self) -> String {
+
+        if !self.active() {
+            return format!("inactive device with id = {}:{}", self.device_desc.vendor_id(), self.device_desc.product_id());
+        }
+
+        self.device.open().ok().map(
+            |d| {
+                d.read_languages(Duration::from_millis(10))
+                    .ok().map(|langs| langs.first().cloned()).flatten()
+                    .map(|lang| d.read_product_string(lang, &self.device_desc, Duration::from_millis(10)).ok())
+                    .flatten()
+                    .or(d.read_product_string_ascii(&self.device_desc).ok())
+                    .unwrap_or(format!("{}:{}", self.device_desc.vendor_id(), self.device_desc.product_id()))
+            },
+        ).expect("failed to open device")
+    }
+}
+
+impl Display for PortConnectedDevice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:>10}: [{:<10}] {}", self.path(), self.id(), self.description())
+    }
+}
+
+fn main() {
+    let devices = rusb::devices().unwrap().iter()
+        .map(|device| PortConnectedDevice::from(device))
+        .flatten()
+        .collect::<Vec<PortConnectedDevice>>();
+
+    let id = std::env::args().nth(1);
+    if let Some(id) = id {
+        devices.into_iter()
+            .find(|device| device.id() == id)
+            .map(|device| device.toggle());
+    } else {
+        devices.into_iter().for_each(|device| println!("{}", device));
     }
 }
