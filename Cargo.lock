@@ -46,7 +46,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "usbpc"
+name = "usb-toggle"
 version = "0.1.0"
 dependencies = [
  "rusb",

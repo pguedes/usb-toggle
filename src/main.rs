@@ -24,7 +24,7 @@ impl PortConnectedDevice {
         self.device.active_config_descriptor().map_or(false, |_| true)
     }
 
-    fn toggle(self) -> std::io::Result<()> {
+    fn toggle(&self) -> std::io::Result<()> {
         if self.active() {
             self.unbind()
         } else {
@@ -43,7 +43,7 @@ impl PortConnectedDevice {
         fs::write("/sys/bus/usb/drivers/usb/bind", self.path())
     }
 
-    fn unbind(self) -> std::io::Result<()> {
+    fn unbind(&self) -> std::io::Result<()> {
         fs::write("/sys/bus/usb/drivers/usb/unbind", self.path())
     }
 
@@ -73,13 +73,27 @@ impl Display for PortConnectedDevice {
 }
 
 fn main() {
+
+    let arg = std::env::args().nth(1);
+    if let Some(arg) = arg.as_ref() {
+        if arg == "-h" || arg == "--help" {
+            println!("Usage: usb-toggle [id]");
+            println!("  id: id of the device to toggle");
+            println!("      if not provided, all devices are listed");
+            return;
+        } else if (arg == "-v" || arg == "--version") {
+            println!("usb-toggle v{}", env!("CARGO_PKG_VERSION"));
+        } else if arg == "-d" || arg == "--disable" {
+        } else if arg == "-e" || arg == "--enable" {
+        }
+    }
+
     let devices = rusb::devices().unwrap().iter()
         .map(|device| PortConnectedDevice::from(device))
         .flatten()
         .collect::<Vec<PortConnectedDevice>>();
 
-    let id = std::env::args().nth(1);
-    if let Some(id) = id {
+    if let Some(id) = arg {
         devices.into_iter()
             .find(|device| device.id() == id)
             .map(|device| device.toggle());

@@ -1,7 +1,11 @@
 [package]
-name = "usbpc"
+name = "usb-toggle"
 version = "0.1.0"
 edition = "2021"
+
+[[bin]]
+name = "usbt"
+path = "src/main.rs"
 
 [dependencies]
 rusb = "0.9"
