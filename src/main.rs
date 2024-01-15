@@ -1,27 +1,51 @@
 use std::fmt::Display;
 use std::fs;
-use std::time::Duration;
 
-struct PortConnectedDevice {
-    device: rusb::Device<rusb::GlobalContext>,
-    device_desc: rusb::DeviceDescriptor,
-    ports: Vec<u8>,
+trait PortConnectedDevice {
+    fn id(&self) -> String;
+    fn path(&self) -> &str;
+    fn vendor(&self) -> String;
+    fn product(&self) -> String;
+    fn active(&self) -> bool;
+    fn toggle(&self) -> std::io::Result<()>;
+    fn bind(&self) -> std::io::Result<()>;
+    fn unbind(&self) -> std::io::Result<()>;
+    fn description(&self) -> String;
 }
 
-impl PortConnectedDevice {
-    fn from(device: rusb::Device<rusb::GlobalContext>) -> Option<PortConnectedDevice> {
-        let device_desc = device.device_descriptor().unwrap();
-        device.port_numbers().ok()
-            .filter(|p| !p.is_empty())
-            .map(|ports| PortConnectedDevice { device, device_desc, ports })
+struct SysFsDevice {
+    path: String,
+}
+
+impl PortConnectedDevice for SysFsDevice {
+    fn id(&self) -> String {
+        let mut id = String::new();
+        id.push_str(&self.vendor());
+        id.push_str(":");
+        id.push_str(&self.product());
+        id
     }
 
-    fn id(&self) -> String {
-        format!("{}:{}", self.device_desc.vendor_id(), self.device_desc.product_id())
+    fn path(&self) -> &str {
+        self.path.as_str()
+    }
+
+    fn vendor(&self) -> String {
+        fs::read_to_string(format!("/sys/bus/usb/devices/{}/idVendor", self.path))
+            .map(|s| s.trim().to_string())
+            .unwrap_or("unknown".to_string())
+    }
+
+    fn product(&self) -> String {
+        fs::read_to_string(format!("/sys/bus/usb/devices/{}/idProduct", self.path))
+            .map(|s| s.trim().to_string())
+            .unwrap_or("unknown".to_string())
     }
 
     fn active(&self) -> bool {
-        self.device.active_config_descriptor().map_or(false, |_| true)
+        fs::read_to_string(format!("/sys/bus/usb/devices/{}/bConfigurationValue", self.path))
+            .map(|s| s.trim().to_string() != "")
+            .unwrap_or(false)
     }
 
     fn toggle(&self) -> std::io::Result<()> {
@@ -30,13 +54,6 @@ impl PortConnectedDevice {
         } else {
             self.bind()
         }
-    }
-
-    fn path(&self) -> String {
-        format!("{}-{}",
-                self.device.bus_number(),
-                self.ports.iter().map(|p| p.to_string()).collect::<Vec<String>>().join(".")
-        )
     }
 
     fn bind(&self) -> std::io::Result<()> {
@@ -48,32 +65,33 @@ impl PortConnectedDevice {
     }
 
     fn description(&self) -> String {
-
-        if !self.active() {
-            return format!("inactive device with id = {}:{}", self.device_desc.vendor_id(), self.device_desc.product_id());
-        }
-
-        self.device.open().ok().map(
-            |d| {
-                d.read_languages(Duration::from_millis(10))
-                    .ok().map(|langs| langs.first().cloned()).flatten()
-                    .map(|lang| d.read_product_string(lang, &self.device_desc, Duration::from_millis(10)).ok())
-                    .flatten()
-                    .or(d.read_product_string_ascii(&self.device_desc).ok())
-                    .unwrap_or(format!("{}:{}", self.device_desc.vendor_id(), self.device_desc.product_id()))
-            },
-        ).expect("failed to open device")
+        fs::read_to_string(format!("/sys/bus/usb/devices/{}/product", self.path))
+            .map(|s| s.trim().to_string())
+            .unwrap_or(format!("unknown device with id = {}", self.path))
     }
 }
 
-impl Display for PortConnectedDevice {
+impl Display for SysFsDevice {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:>10}: [{:<10}] {}", self.path(), self.id(), self.description())
+        write!(f, "{:2}{:>10} {:>width$} {}",
+               if self.active() { "✓" } else { "" },
+               self.id(),
+               self.path(),
+               self.description(),
+               width = 6)
     }
+}
+
+fn sysfs_devices() -> Vec<SysFsDevice> {
+    fs::read_dir("/sys/bus/usb/devices").unwrap().into_iter()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .filter(|id| !id.contains(":"))
+        .map(|id| SysFsDevice { path: id })
+        .filter(|device| device.vendor() != "1d6b")// linux foundation
+        .collect::<Vec<SysFsDevice>>()
 }
 
 fn main() {
-
     let arg = std::env::args().nth(1);
     if let Some(arg) = arg.as_ref() {
         if arg == "-h" || arg == "--help" {
@@ -81,17 +99,12 @@ fn main() {
             println!("  id: id of the device to toggle");
             println!("      if not provided, all devices are listed");
             return;
-        } else if (arg == "-v" || arg == "--version") {
+        } else if arg == "-v" || arg == "--version" {
             println!("usb-toggle v{}", env!("CARGO_PKG_VERSION"));
-        } else if arg == "-d" || arg == "--disable" {
-        } else if arg == "-e" || arg == "--enable" {
         }
     }
 
-    let devices = rusb::devices().unwrap().iter()
-        .map(|device| PortConnectedDevice::from(device))
-        .flatten()
-        .collect::<Vec<PortConnectedDevice>>();
+    let devices = sysfs_devices();
 
     if let Some(id) = arg {
         devices.into_iter()

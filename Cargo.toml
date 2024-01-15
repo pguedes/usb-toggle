@@ -8,5 +8,3 @@ name = "usbt"
 path = "src/main.rs"
 
 [dependencies]
-rusb = "0.9"
-
