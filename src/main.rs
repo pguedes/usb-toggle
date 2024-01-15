@@ -1,5 +1,5 @@
-use std::fmt::Display;
 use std::fs;
+use colored::Colorize;
 
 trait PortConnectedDevice {
     fn id(&self) -> String;
@@ -71,16 +71,16 @@ impl PortConnectedDevice for SysFsDevice {
     }
 }
 
-impl Display for SysFsDevice {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:2}{:>10} {:>width$} {}",
-               if self.active() { "✓" } else { "" },
-               self.id(),
-               self.path(),
-               self.description(),
-               width = 6)
-    }
-}
+// impl Display for SysFsDevice {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         write!(f, "{:2}{:>10} {:>width$} {}",
+//                if self.active() { "✓" } else { "" },
+//                self.id(),
+//                self.path(),
+//                self.description(),
+//                width = 6)
+//     }
+// }
 
 fn sysfs_devices() -> Vec<SysFsDevice> {
     fs::read_dir("/sys/bus/usb/devices").unwrap().into_iter()
@@ -111,6 +111,23 @@ fn main() {
             .find(|device| device.id() == id)
             .map(|device| device.toggle());
     } else {
-        devices.into_iter().for_each(|device| println!("{}", device));
+        devices.into_iter()
+            .for_each(|device|
+                if device.active() {
+                    println!("{:2}{:>10} {:>width$} {}",
+                             "✓".green().bold(),
+                             device.id().bold(),
+                             device.path().italic(),
+                             device.description(),
+                             width = 6)
+                } else {
+                    println!("{:2}{:>10} {:>width$} {}",
+                             "",
+                             device.id().truecolor(128, 128, 128).bold(),
+                             device.path().truecolor(128, 128, 128).bold(),
+                             device.description().truecolor(128, 128, 128).bold(),
+                             width = 6)
+                }
+            );
     }
 }
