@@ -1,5 +1,9 @@
 use std::fs;
+use std::process::exit;
+
 use colored::Colorize;
+
+use nix::unistd::Uid;
 
 trait PortConnectedDevice {
     fn id(&self) -> String;
@@ -71,24 +75,12 @@ impl PortConnectedDevice for SysFsDevice {
     }
 }
 
-// impl Display for SysFsDevice {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         write!(f, "{:2}{:>10} {:>width$} {}",
-//                if self.active() { "✓" } else { "" },
-//                self.id(),
-//                self.path(),
-//                self.description(),
-//                width = 6)
-//     }
-// }
-
-fn sysfs_devices() -> Vec<SysFsDevice> {
+fn sysfs_devices() -> impl Iterator<Item=SysFsDevice> {
     fs::read_dir("/sys/bus/usb/devices").unwrap().into_iter()
         .map(|entry| entry.unwrap().file_name().into_string().unwrap())
         .filter(|id| !id.contains(":"))
         .map(|id| SysFsDevice { path: id })
         .filter(|device| device.vendor() != "1d6b")// linux foundation
-        .collect::<Vec<SysFsDevice>>()
 }
 
 fn main() {
@@ -107,6 +99,10 @@ fn main() {
     let devices = sysfs_devices();
 
     if let Some(id) = arg {
+        if !Uid::effective().is_root() {
+            println!("executable needs root permissions to toggle devices");
+            exit(1)
+        }
         devices.into_iter()
             .find(|device| device.id() == id)
             .map(|device| device.toggle());
@@ -115,18 +111,21 @@ fn main() {
             .for_each(|device|
                 if device.active() {
                     println!("{:2}{:>10} {:>width$} {}",
-                             "✓".green().bold(),
+                             "⏻".green().bold(),
                              device.id().bold(),
                              device.path().italic(),
                              device.description(),
                              width = 6)
                 } else {
-                    println!("{:2}{:>10} {:>width$} {}",
-                             "",
-                             device.id().truecolor(128, 128, 128).bold(),
-                             device.path().truecolor(128, 128, 128).bold(),
-                             device.description().truecolor(128, 128, 128).bold(),
-                             width = 6)
+                    let s = format!("{:2}{:>10} {:>width$} {}",
+                            "⏻".red().bold(),
+                            device.id(),
+                            device.path(),
+                            device.description(),
+                            width = 6
+                    ).truecolor(128, 128, 128);
+
+                    println!("{}", s)
                 }
             );
     }
